@@ -2,43 +2,6 @@
 
 汇生系统是一个面向足底压力采集、可视化与分析的前后端一体化项目。系统支持通过浏览器连接硬件采集足底压力数据，并提供实时监测、数据采集、压力热力图、COP 轨迹分析、足弓指标分析和报告展示等能力。
 
-## 项目功能
-
-- 足底压力数据实时监测
-- 64 x 64 压力矩阵数据展示与处理
-- 2D 压力热力图和 3D 鞋垫模型可视化
-- 用户信息录入与采集流程管理
-- 静态/动态压力数据采集
-- COP 压力中心轨迹分析
-- 足弓、前足/中足/后足区域压力分析
-- Python 算法服务分析与前端降级分析
-- 分析报告页面展示
-
-## 技术栈
-
-前端：
-
-- React
-- TypeScript
-- Vite
-- Tailwind CSS
-- Three.js / React Three Fiber
-- Recharts
-- Radix UI / shadcn ui
-
-后端与算法：
-
-- Python
-- FastAPI
-- NumPy / Pandas / SciPy
-- Matplotlib
-- OpenCV
-
-硬件通信：
-
-- Web Serial API
-- 串口压力传感器数据采集
-
 ## 项目结构
 
 ```text
@@ -85,19 +48,6 @@ TypeScript 检查：
 
 ```powershell
 pnpm check
-```
-
-## 开发协作
-
-主分支 `main` 用于保存稳定版本。新功能开发请从 `main` 创建独立分支，开发完成后推送到 GitHub，并通过 Pull Request 合并回 `main`。
-
-示例：
-
-```powershell
-git checkout main
-git pull origin main
-git checkout -b chunkouyin
-git push -u origin chunkouyin
 ```
 
 ## 注意事项
