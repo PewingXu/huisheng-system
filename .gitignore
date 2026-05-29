@@ -1,0 +1,35 @@
+node_modules/
+dist/
+
+# Logs
+*.log
+*.err.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables and local secrets
+.env
+.env.*
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build and cache output
+.vite/
+.cache/
+coverage/
+
+# Local tool/workspace files
+.claude/
+.manus-logs/
+client/public/__manus__/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
