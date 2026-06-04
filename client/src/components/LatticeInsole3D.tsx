@@ -21,180 +21,16 @@ import { OrbitControls, PerspectiveCamera, Environment, ContactShadows } from '@
 import { Suspense, useMemo, useRef, useEffect, memo } from 'react';
 import * as THREE from 'three';
 import { INSOLE_CONTOURS } from '@/lib/insoleContours';
-
-// ============ 轮廓工具函数 ============
-
-function scaleContour(
-  points: readonly (readonly [number, number])[],
-  footLength: number,
-  footWidth: number,
-  foot: 'left' | 'right'
-): [number, number][] {
-  const ys = points.map(p => p[1]);
-  const xs = points.map(p => p[0]);
-  const normH = Math.max(...ys) - Math.min(...ys);
-  const normW = Math.max(...xs) - Math.min(...xs);
-  
-  const scaleY = footLength / normH;
-  const scaleX = footWidth / normW;
-  
-  const minY = Math.min(...ys);
-  const centerX = (Math.max(...xs) + Math.min(...xs)) / 2;
-  
-  // 右脚EPS轮廓的Y轴方向与左脚相反：
-  // 左脚：正Y=脚趾（宽端），负Y=脚跟（窄端）
-  // 右脚：正Y=脚跟（窄端），负Y=脚趾（宽端）
-  // 需要翻转右脚的Y轴使两只脚的脚趾都映射到Three.js的负Z方向
-  const maxY = Math.max(...ys);
-  
-  return points.map(([x, y]) => {
-    const sx = -(x - centerX) * scaleX;
-    
-    let sz: number;
-    if (foot === 'left') {
-      // 左脚：正Y=脚趾 → 负Z=前方
-      sz = -((y - minY) * scaleY - footLength / 2);
-    } else {
-      // 右脚：翻转Y轴，使负Y(脚趾)映射到负Z(前方)
-      // 翻转：用 maxY - (y - minY) = maxY - y + minY 来反转Y
-      sz = -(((maxY - y + minY) - minY) * scaleY - footLength / 2);
-      // 简化为: sz = -((maxY - y) * scaleY - footLength / 2)
-    }
-    return [sx, sz];
-  });
-}
-
-function pointInPolygon(px: number, py: number, polygon: [number, number][]): boolean {
-  let inside = false;
-  const n = polygon.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = polygon[i][0], yi = polygon[i][1];
-    const xj = polygon[j][0], yj = polygon[j][1];
-    if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-function getBounds(polygon: [number, number][]): { minX: number; maxX: number; minY: number; maxY: number } {
-  const xs = polygon.map(p => p[0]);
-  const ys = polygon.map(p => p[1]);
-  return {
-    minX: Math.min(...xs), maxX: Math.max(...xs),
-    minY: Math.min(...ys), maxY: Math.max(...ys)
-  };
-}
-
-/**
- * 计算鞋垫在某个位置的高度（足弓区域隆起）
- * 
- * z坐标：正值=脚跟端，负值=脚趾端
- * 足弓隆起在内侧更高
- */
-export interface ZoneSupportCompensation {
-  forefoot: number;
-  arch: number;
-  heel: number;
-}
-
-function createSmoothZoneWeight(value: number, start: number, end: number): number {
-  if (value <= start || value >= end) return 0;
-  const t = (value - start) / (end - start);
-  return Math.sin(t * Math.PI) ** 2;
-}
-
-function getCompensationZoneWeights(
-  x: number,
-  z: number,
-  footLength: number,
-  foot: 'left' | 'right'
-): ZoneSupportCompensation {
-  const normalizedZ = (-z + footLength / 2) / footLength;
-  const halfWidth = footLength * 0.2;
-  const normalizedX = Math.max(-1, Math.min(1, x / halfWidth));
-  const innerSide = foot === 'left' ? normalizedX : -normalizedX;
-
-  return {
-    forefoot:
-      createSmoothZoneWeight(normalizedZ, 0.58, 0.92) *
-      (0.75 + 0.25 * (1 - Math.abs(normalizedX))),
-    arch:
-      createSmoothZoneWeight(normalizedZ, 0.28, 0.56) *
-      (0.4 + 0.6 * Math.max(0, innerSide)),
-    heel:
-      createSmoothZoneWeight(normalizedZ, 0.02, 0.32) *
-      (0.8 + 0.2 * (1 - Math.abs(normalizedX))),
-  };
-}
-
-function getLocalCompensationCm(
-  x: number,
-  z: number,
-  footLength: number,
-  foot: 'left' | 'right',
-  compensation: ZoneSupportCompensation
-): number {
-  const weights = getCompensationZoneWeights(x, z, footLength, foot);
-
-  return (
-    (compensation.forefoot / 10) * weights.forefoot +
-    (compensation.arch / 10) * weights.arch +
-    (compensation.heel / 10) * weights.heel
-  );
-}
-
-function getInsoleHeight(
-  x: number, z: number,
-  footLength: number,
-  archCorrection: number,
-  baseThickness: number,
-  foot: 'left' | 'right',
-  heelThickness: number = 0,
-  compensation: ZoneSupportCompensation = { forefoot: 0, arch: 0, heel: 0 }
-): number {
-  // normalizedZ: 0=heel(脚跟), 1=toe(脚趾)
-  const normalizedZ = (-z + footLength / 2) / footLength;
-
-  // 足弓隆起曲线 - 位于30%-55%位置（从脚跟算起）
-  const archCenter = 0.42;
-  const archWidth = 0.18;
-  const archDist = Math.abs(normalizedZ - archCenter) / archWidth;
-  const archProfile = archDist < 1 ? Math.cos(archDist * Math.PI / 2) ** 2 : 0;
-
-  // 足弓在内侧更高（内侧隆起，外侧平缓）
-  // normalizedX 映射到 [-1, 1]，内侧为正，外侧为负
-  const halfWidth = footLength * 0.2; // 近似半足宽
-  const normalizedX = Math.max(-1, Math.min(1, x / halfWidth));
-  // innerFactor: 0（外侧边缘）→ 1（内侧边缘），clamp到[0,1]
-  const rawInner = foot === 'left' ?
-    (1 + normalizedX) / 2 :
-    (1 - normalizedX) / 2;
-  const innerFactor = Math.max(0, Math.min(1, rawInner));
-
-  // 足弓矫正高度：archCorrection(mm) → cm
-  // 外侧最低为矫正量的30%，内侧最高为矫正量的100%
-  const archHeight = (archCorrection / 10) * archProfile * (0.3 + 0.7 * innerFactor);
-
-  // 脚跟杯状（侧向包裹）
-  const heelNorm = normalizedZ;
-  const heelCup = heelNorm < 0.15 ? (1 - heelNorm / 0.15) * 0.15 : 0;
-
-  // 足跟缓冲厚度：heelThickness(mm) → cm
-  // 足跟缓冲区域：0%~35%（从脚跟算起），使用余弦平滑过渡
-  const heelThickCm = heelThickness / 10;
-  const heelCushionZone = 0.35;
-  const heelCushion = normalizedZ < heelCushionZone
-    ? heelThickCm * Math.cos(normalizedZ / heelCushionZone * Math.PI / 2) ** 2
-    : 0;
-
-  const baseHeight = baseThickness + archHeight + heelCup + heelCushion;
-  const localCompensation = getLocalCompensationCm(x, z, footLength, foot, compensation);
-  const minThickness = Math.max(0.12, baseThickness * 0.55);
-  const adjustedHeight = baseHeight + localCompensation;
-
-  return localCompensation >= 0 ? adjustedHeight : Math.max(minThickness, adjustedHeight);
-}
+import {
+  generateLatticeData,
+  getBounds,
+  getCompensationZoneWeights,
+  getInsoleHeight,
+  getLatticeSpec,
+  pointInPolygon,
+  scaleContour,
+  type ZoneSupportCompensation,
+} from '@/lib/latticeGeometry';
 
 // ============ Strut数据结构 ============
 
@@ -223,6 +59,8 @@ function computeStrutTransform(start: THREE.Vector3, end: THREE.Vector3): StrutD
 // ============ 单只鞋垫3D网格 ============
 
 const maxInstances = 30000;
+
+export type { ZoneSupportCompensation } from '@/lib/latticeGeometry';
 
 type CompensationZoneName = keyof ZoneSupportCompensation;
 
@@ -401,140 +239,29 @@ function SingleInsole({
   const jointsRef = useRef<THREE.InstancedMesh>(null);
 
   const { strutTransforms, jointPositions } = useMemo(() => {
-    const outerRaw = foot === 'left' ? INSOLE_CONTOURS.leftOuter : INSOLE_CONTOURS.rightOuter;
-    const outerContour = scaleContour(outerRaw, footLength, footWidth, foot);
-    const bounds = getBounds(outerContour);
-    
-    // 晶格体密度档位到cellSize的映射：1=稀疏(1.0cm), 2=较稀(0.85cm), 3=标准(0.65cm), 4=较密(0.5cm), 5=密集(0.4cm)
-    const densityMap: Record<number, number> = { 1: 1.0, 2: 0.85, 3: 0.65, 4: 0.5, 5: 0.4 };
-    const cellSize = densityMap[latticeDensity] ?? 0.65;
-    
-    const struts: StrutData[] = [];
-    const joints: THREE.Vector3[] = [];
-    
-    const rows = Math.ceil((bounds.maxY - bounds.minY) / cellSize);
-    const cols = Math.ceil((bounds.maxX - bounds.minX) / cellSize);
-    
-    type GridPoint = { pos: THREE.Vector3; valid: boolean };
-    
-    const makeGrid = (heightFactor: number): GridPoint[][] => {
-      const grid: GridPoint[][] = [];
-      for (let r = 0; r <= rows; r++) {
-        const row: GridPoint[] = [];
-        for (let c = 0; c <= cols; c++) {
-          const x = bounds.minX + c * cellSize;
-          const z = bounds.minY + r * cellSize;
-          if (pointInPolygon(x, z, outerContour)) {
-            const h = getInsoleHeight(x, z, footLength, archCorrection, baseThickness, foot, heelThickness, compensation) * heightFactor;
-            row.push({ pos: new THREE.Vector3(x, h, z), valid: true });
-          } else {
-            row.push({ pos: new THREE.Vector3(0, 0, 0), valid: false });
-          }
-        }
-        grid.push(row);
-      }
-      return grid;
+    const lattice = generateLatticeData(
+      foot,
+      footLength,
+      footWidth,
+      archCorrection,
+      baseThickness,
+      heelThickness,
+      latticeDensity,
+      compensation,
+    );
+
+    return {
+      strutTransforms: lattice.struts
+        .map(strut => computeStrutTransform(strut.start, strut.end))
+        .filter((transform): transform is StrutData => transform !== null),
+      jointPositions: lattice.joints,
     };
-    
-    const topGrid = makeGrid(1.0);
-    const botGrid = makeGrid(0.0);
-    
-    // 中间层（偏移半格）
-    const midGrid: GridPoint[][] = [];
-    for (let r = 0; r < rows; r++) {
-      const row: GridPoint[] = [];
-      for (let c = 0; c < cols; c++) {
-        const x = bounds.minX + (c + 0.5) * cellSize;
-        const z = bounds.minY + (r + 0.5) * cellSize;
-        if (pointInPolygon(x, z, outerContour)) {
-          const h = getInsoleHeight(x, z, footLength, archCorrection, baseThickness, foot, heelThickness, compensation) * 0.5;
-          row.push({ pos: new THREE.Vector3(x, h, z), valid: true });
-        } else {
-          row.push({ pos: new THREE.Vector3(0, 0, 0), valid: false });
-        }
-      }
-      midGrid.push(row);
-    }
-    
-    const addStrut = (a: THREE.Vector3, b: THREE.Vector3) => {
-      const t = computeStrutTransform(a, b);
-      if (t) struts.push(t);
-    };
-    
-    // 顶面水平连接
-    for (let r = 0; r <= rows; r++) {
-      for (let c = 0; c <= cols; c++) {
-        if (!topGrid[r][c].valid) continue;
-        const p = topGrid[r][c].pos;
-        joints.push(p.clone());
-        
-        if (c < cols && topGrid[r][c + 1].valid) addStrut(p, topGrid[r][c + 1].pos);
-        if (r < rows && topGrid[r + 1][c].valid) addStrut(p, topGrid[r + 1][c].pos);
-      }
-    }
-    
-    // 底面水平连接
-    for (let r = 0; r <= rows; r++) {
-      for (let c = 0; c <= cols; c++) {
-        if (!botGrid[r][c].valid) continue;
-        const p = botGrid[r][c].pos;
-        joints.push(p.clone());
-        
-        if (c < cols && botGrid[r][c + 1].valid) addStrut(p, botGrid[r][c + 1].pos);
-        if (r < rows && botGrid[r + 1][c].valid) addStrut(p, botGrid[r + 1][c].pos);
-      }
-    }
-    
-    // 垂直连接
-    for (let r = 0; r <= rows; r++) {
-      for (let c = 0; c <= cols; c++) {
-        if (topGrid[r][c].valid && botGrid[r][c].valid) {
-          addStrut(topGrid[r][c].pos, botGrid[r][c].pos);
-        }
-      }
-    }
-    
-    // 对角线连接（通过中间层）
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        if (!midGrid[r][c].valid) continue;
-        const mid = midGrid[r][c].pos;
-        joints.push(mid.clone());
-        
-        const corners = [
-          { r, c }, { r, c: c + 1 }, { r: r + 1, c }, { r: r + 1, c: c + 1 }
-        ];
-        
-        for (const cr of corners) {
-          if (topGrid[cr.r]?.[cr.c]?.valid) addStrut(mid, topGrid[cr.r][cr.c].pos);
-          if (botGrid[cr.r]?.[cr.c]?.valid) addStrut(mid, botGrid[cr.r][cr.c].pos);
-        }
-      }
-    }
-    
-    // 轮廓边缘壁
-    const step = Math.max(1, Math.floor(outerContour.length / 80));
-    for (let i = 0; i < outerContour.length; i += step) {
-      const [x1, z1] = outerContour[i];
-      const ni = (i + step) % outerContour.length;
-      const [x2, z2] = outerContour[ni];
-      
-      const h1 = getInsoleHeight(x1, z1, footLength, archCorrection, baseThickness, foot, heelThickness, compensation);
-      const h2 = getInsoleHeight(x2, z2, footLength, archCorrection, baseThickness, foot, heelThickness, compensation);
-      
-      addStrut(new THREE.Vector3(x1, h1, z1), new THREE.Vector3(x2, h2, z2));
-      addStrut(new THREE.Vector3(x1, 0, z1), new THREE.Vector3(x2, 0, z2));
-      if (i % (step * 2) === 0) {
-        addStrut(new THREE.Vector3(x1, h1, z1), new THREE.Vector3(x1, 0, z1));
-      }
-    }
-    
-    return { strutTransforms: struts, jointPositions: joints };
   }, [foot, footLength, footWidth, archCorrection, baseThickness, heelThickness, latticeDensity, compensation]);
 
-  // 杆件和节点半径根据密度自适应：密度越高杆件越细
-  const strutRadius = latticeDensity <= 2 ? 0.05 : latticeDensity >= 4 ? 0.03 : 0.04;
-  const jointRadius = latticeDensity <= 2 ? 0.08 : latticeDensity >= 4 ? 0.05 : 0.07;
+  const { strutRadiusCm: strutRadius, jointRadiusCm: jointRadius } = useMemo(
+    () => getLatticeSpec(latticeDensity),
+    [latticeDensity],
+  );
 
   useEffect(() => {
     if (strutsRef.current) {
@@ -679,10 +406,10 @@ export const LatticeInsoleViewer = memo(function LatticeInsoleViewerInner({
         <Suspense fallback={null}>
           <Environment files="/hdri/studio_small_03_1k.hdr" />
 
-          {/* 左脚在右侧（正X方向） */}
+          {/* 左脚在右侧（正X方向）；单脚预览时切换为左脚外形 */}
           {(activeFoot === 'left' || activeFoot === 'both') && (
             <SingleInsole
-              foot="left"
+              foot={activeFoot === 'both' ? 'left' : 'right'}
               footLength={leftParams.footLength}
               footWidth={leftParams.footWidth}
               archCorrection={leftParams.archCorrection}
@@ -700,10 +427,10 @@ export const LatticeInsoleViewer = memo(function LatticeInsoleViewerInner({
             />
           )}
 
-          {/* 右脚在左侧（负X方向） */}
+          {/* 右脚在左侧（负X方向）；单脚预览时切换为右脚外形 */}
           {(activeFoot === 'right' || activeFoot === 'both') && (
             <SingleInsole
-              foot="right"
+              foot={activeFoot === 'both' ? 'right' : 'left'}
               footLength={rightParams.footLength}
               footWidth={rightParams.footWidth}
               archCorrection={rightParams.archCorrection}

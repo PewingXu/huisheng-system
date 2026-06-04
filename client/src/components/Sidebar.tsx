@@ -34,6 +34,7 @@ interface SidebarProps {
 
 export default function Sidebar({ currentStep, onStepChange }: SidebarProps) {
   const { state } = useApp();
+  const isSolutionStepBlocked = (stepId: number) => stepId === 5 && (state.analysisStatus === 'pending' || (!state.footAnalysis && !state.reportData));
 
   return (
     <aside className="w-64 h-screen bg-card border-r border-border flex flex-col fixed left-0 top-0 z-40">
@@ -57,7 +58,7 @@ export default function Sidebar({ currentStep, onStepChange }: SidebarProps) {
             const Icon = step.icon;
             const isActive = currentStep === step.id;
             const isCompleted = currentStep > step.id;
-            const isDisabled = step.id > 1 && !state.currentUser && step.id !== 0;
+            const isDisabled = (step.id > 1 && !state.currentUser && step.id !== 0) || isSolutionStepBlocked(step.id);
 
             return (
               <button

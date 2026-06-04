@@ -12,6 +12,7 @@ import { useApp } from '@/contexts/AppContext';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
   Download,
   RotateCcw,
@@ -24,7 +25,9 @@ import {
   ArrowUpDown,
   MoveHorizontal,
   Activity,
+  CircleAlert,
   Info,
+  Lightbulb,
   Footprints,
   ChevronDown,
   ChevronUp,
@@ -62,6 +65,35 @@ const colorOptions = [
   { name: '活力橙', value: '#F97316' },
   { name: '自然绿', value: '#22C55E' },
 ];
+
+const PARAMETER_EXPLANATIONS = {
+  archCorrection: '依据舟骨下降理论，结合舒适度修正系数，并参考用户足弓高度计算得到，用于在支撑效果与穿着舒适度之间取得平衡。',
+  baseThickness: '基础厚度依据传感器材料特性与穿着舒适度设定，是鞋垫整体支撑和缓冲的基础参数。',
+  heelThickness: '足跟厚度以 10mm 为基础值，参考足跟脂肪垫平均压缩量设定。当天然足跟垫萎缩、减震行程缩短时，鞋垫需要进行补偿。足型越偏离正常，通常会给予更多后跟缓冲，以更好平衡减震、支撑与矫正。',
+} as const;
+
+function ParameterHelp({ title, description }: { title: string; description: string }) {
+  return (
+    <HoverCard openDelay={150} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+          onClick={(event) => event.preventDefault()}
+          aria-label={`${title}说明`}
+        >
+          <Info className="w-3.5 h-3.5" />
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" className="w-72 p-3">
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-foreground">{title}</p>
+          <p className="text-xs leading-5 text-muted-foreground">{description}</p>
+        </div>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
 
 /** 单脚参数面板（React.memo 优化：参数不变时不重渲染，避免左右脚互相拖累） */
 const FootParamPanel = memo(function FootParamPanel({
@@ -101,17 +133,17 @@ const FootParamPanel = memo(function FootParamPanel({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground bg-gray-100 px-2 py-1 rounded">
+          <span className="text-xs text-muted-foreground bg-gray-100 px-2 py-1 rounded inline-flex items-center gap-1.5">
             矫正 +{params.archCorrection}mm
+            <ParameterHelp title="足弓矫正厚度" description={PARAMETER_EXPLANATIONS.archCorrection} />
           </span>
-          <span className="text-xs text-muted-foreground bg-blue-50 px-2 py-1 rounded">
+          <span className="text-xs text-muted-foreground bg-blue-50 px-2 py-1 rounded inline-flex items-center gap-1.5">
             基厚 {(params.baseThickness * 10).toFixed(1)}mm
+            <ParameterHelp title="基础厚度" description={PARAMETER_EXPLANATIONS.baseThickness} />
           </span>
-          <span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs font-medium">
+          <span className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs font-medium inline-flex items-center gap-1.5">
             足跟 {params.heelThickness}mm
-          </span>
-          <span className="px-2 py-0.5 bg-violet-50 text-violet-700 rounded-full text-xs font-medium">
-            密度 {params.latticeDensity === 1 ? '稀疏' : params.latticeDensity === 2 ? '较稀' : params.latticeDensity === 3 ? '标准' : params.latticeDensity === 4 ? '较密' : '密集'}
+            <ParameterHelp title="足跟缓冲厚度" description={PARAMETER_EXPLANATIONS.heelThickness} />
           </span>
           {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </div>
@@ -199,6 +231,7 @@ const FootParamPanel = memo(function FootParamPanel({
                   <div className="flex items-center gap-1.5">
                     <Activity className="w-3.5 h-3.5" style={{ color: levelColor }} />
                     <span className="text-xs font-medium">足弓矫正厚度 (ΔHS)</span>
+                    <ParameterHelp title="足弓矫正厚度" description={PARAMETER_EXPLANATIONS.archCorrection} />
                   </div>
                   <span className="text-sm font-mono font-bold" style={{ color: levelColor }}>+{params.archCorrection} mm</span>
                 </div>
@@ -240,6 +273,7 @@ const FootParamPanel = memo(function FootParamPanel({
                   <div className="flex items-center gap-1.5">
                     <Scale className="w-3.5 h-3.5 text-indigo-500" />
                     <span className="text-xs font-medium">基础厚度（压力自适应）</span>
+                    <ParameterHelp title="基础厚度" description={PARAMETER_EXPLANATIONS.baseThickness} />
                   </div>
                   <span className="text-sm font-mono font-bold text-indigo-600">{(params.baseThickness * 10).toFixed(1)} mm</span>
                 </div>
@@ -268,6 +302,7 @@ const FootParamPanel = memo(function FootParamPanel({
                   <div className="flex items-center gap-1.5">
                     <ArrowUpDown className="w-3.5 h-3.5 text-amber-500" />
                     <span className="text-xs font-medium">足跟缓冲厚度</span>
+                    <ParameterHelp title="足跟缓冲厚度" description={PARAMETER_EXPLANATIONS.heelThickness} />
                   </div>
                   <span className="text-sm font-mono font-bold text-amber-600">{params.heelThickness} mm</span>
                 </div>
@@ -289,46 +324,63 @@ const FootParamPanel = memo(function FootParamPanel({
                 </div>
               </div>
 
-              {/* 晶格体密度 */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Activity className="w-3.5 h-3.5 text-violet-500" />
-                    <span className="text-xs font-medium">晶格体密度</span>
-                  </div>
-                  <span className="text-sm font-mono font-bold text-violet-600">
-                    {params.latticeDensity === 1 ? '稀疏' : params.latticeDensity === 2 ? '较稀' : params.latticeDensity === 3 ? '标准' : params.latticeDensity === 4 ? '较密' : '密集'}
-                  </span>
-                </div>
-                <Slider
-                  value={[params.latticeDensity]}
-                  onValueChange={([v]) => onChange({ latticeDensity: v })}
-                  min={1} max={5} step={1}
-                />
-                <div className="flex justify-between text-[10px] text-muted-foreground">
-                  <span>1 稀疏</span><span>3 标准</span><span>5 密集</span>
-                </div>
-              </div>
 
               {/* 分区支撑补偿 */}
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-gray-500">建议分区支撑补偿 (mm)</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="text-center p-2 rounded-lg bg-blue-50">
-                    <p className="text-[10px] text-blue-600 font-medium">前掌区</p>
-                    <p className="text-lg font-bold text-blue-700">{params.forefootCompensation >= 0 ? '+' : ''}{params.forefootCompensation.toFixed(1)}</p>
-                    <p className="text-[10px] text-blue-500">正值增强支撑 / 负值局部让位</p>
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-gray-500">分区支撑补偿调节 (mm)</p>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-blue-600">前掌区</span>
+                    <span className="text-sm font-mono font-bold text-blue-700">
+                      {params.forefootCompensation >= 0 ? '+' : ''}{params.forefootCompensation.toFixed(1)} mm
+                    </span>
                   </div>
-                  <div className="text-center p-2 rounded-lg" style={{ backgroundColor: `${levelColor}15` }}>
-                    <p className="text-[10px] font-medium" style={{ color: levelColor }}>足弓区</p>
-                    <p className="text-lg font-bold" style={{ color: levelColor }}>{params.archCompensation >= 0 ? '+' : ''}{params.archCompensation.toFixed(1)}</p>
-                    <p className="text-[10px]" style={{ color: levelColor }}>正值抬高支撑 / 负值减压让位</p>
+                  <Slider
+                    value={[params.forefootCompensation]}
+                    onValueChange={([v]) => onChange({ forefootCompensation: Number(v.toFixed(1)) })}
+                    min={-1.5} max={1.5} step={0.1}
+                  />
+                  <div className="flex justify-between text-[10px] text-muted-foreground">
+                    <span>-1.5mm 减压</span><span>+1.5mm 支撑</span>
                   </div>
-                  <div className="text-center p-2 rounded-lg bg-amber-50">
-                    <p className="text-[10px] text-amber-600 font-medium">后跟区</p>
-                    <p className="text-lg font-bold text-amber-700">{params.heelCompensation >= 0 ? '+' : ''}{params.heelCompensation.toFixed(1)}</p>
-                    <p className="text-[10px] text-amber-500">正值增强承托 / 负值缓冲减压</p>
+                  <p className="text-[10px] text-blue-500">正值增强支撑 / 负值局部让位</p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium" style={{ color: levelColor }}>足弓区</span>
+                    <span className="text-sm font-mono font-bold" style={{ color: levelColor }}>
+                      {params.archCompensation >= 0 ? '+' : ''}{params.archCompensation.toFixed(1)} mm
+                    </span>
                   </div>
+                  <Slider
+                    value={[params.archCompensation]}
+                    onValueChange={([v]) => onChange({ archCompensation: Number(v.toFixed(1)) })}
+                    min={-1.5} max={1.5} step={0.1}
+                  />
+                  <div className="flex justify-between text-[10px] text-muted-foreground">
+                    <span>-1.5mm 减压</span><span>+1.5mm 支撑</span>
+                  </div>
+                  <p className="text-[10px]" style={{ color: levelColor }}>正值抬高支撑 / 负值减压让位</p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-amber-600">后跟区</span>
+                    <span className="text-sm font-mono font-bold text-amber-700">
+                      {params.heelCompensation >= 0 ? '+' : ''}{params.heelCompensation.toFixed(1)} mm
+                    </span>
+                  </div>
+                  <Slider
+                    value={[params.heelCompensation]}
+                    onValueChange={([v]) => onChange({ heelCompensation: Number(v.toFixed(1)) })}
+                    min={-1.5} max={1.5} step={0.1}
+                  />
+                  <div className="flex justify-between text-[10px] text-muted-foreground">
+                    <span>-1.5mm 减压</span><span>+1.5mm 承托</span>
+                  </div>
+                  <p className="text-[10px] text-amber-500">正值增强承托 / 负值缓冲减压</p>
                 </div>
               </div>
             </div>
@@ -341,6 +393,8 @@ const FootParamPanel = memo(function FootParamPanel({
 
 export default function SolutionPage({ onFinish }: SolutionPageProps) {
   const { state, resetApp } = useApp();
+  const isAnalysisPending = state.analysisStatus === 'pending';
+  const hasAnalysisResult = Boolean(state.footAnalysis || state.reportData);
   const [activeTab, setActiveTab] = useState<'left' | 'right' | 'both'>('both');
   const [autoRotate, setAutoRotate] = useState(false);
   const [showCompensationRegions, setShowCompensationRegions] = useState(true);
@@ -471,6 +525,14 @@ export default function SolutionPage({ onFinish }: SolutionPageProps) {
     return () => clearTimeout(t);
   }, [rightParams]);
 
+  // 当分析结果变化时，重新同步默认鞋垫参数
+  useEffect(() => {
+    if (!hasAnalysisResult || isAnalysisPending) return;
+    setLeftParams(getInitialParams('left'));
+    setRightParams(getInitialParams('right'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [footAnalysis, reportData, adaptiveThickness.leftThickness, adaptiveThickness.rightThickness, insoleCategory, hasAnalysisResult, isAnalysisPending]);
+
   // 分类变化时，按当前足长重新查表设置足宽
   useEffect(() => {
     setLeftParams(prev => {
@@ -559,6 +621,23 @@ export default function SolutionPage({ onFinish }: SolutionPageProps) {
   // 压力不均衡提示
   const pressureImbalance = Math.abs(pressureInfo.leftRatio - pressureInfo.rightRatio);
   const isImbalanced = pressureImbalance > 0.04; // >4%视为不均衡
+
+  if (isAnalysisPending || !hasAnalysisResult) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          {isAnalysisPending ? (
+            <>
+              <div className="animate-spin w-12 h-12 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+              <p className="text-muted-foreground">正在同步最新分析结果到解决方案...</p>
+            </>
+          ) : (
+            <p className="text-muted-foreground">请先完成分析报告生成，再查看解决方案</p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen p-6">
@@ -657,7 +736,7 @@ export default function SolutionPage({ onFinish }: SolutionPageProps) {
                   <div>
                     <p className="font-medium text-gray-700">右脚</p>
                     <p className="text-gray-500">{rightParams.footLength.toFixed(1)}cm × {rightParams.footWidth.toFixed(1)}cm · L{rightParams.archLevel} +{rightParams.archCorrection}mm</p>
-                    <p className="text-indigo-500">基厚 {(rightParams.baseThickness * 10).toFixed(1)}mm · 足跟 {rightParams.heelThickness}mm · 密度{rightParams.latticeDensity}</p>
+                    <p className="text-indigo-500">基厚 {(rightParams.baseThickness * 10).toFixed(1)}mm · 足跟 {rightParams.heelThickness}mm</p>
                     <p className="text-blue-500">前掌补偿 {rightParams.forefootCompensation >= 0 ? '+' : ''}{rightParams.forefootCompensation.toFixed(1)}mm · 后跟补偿 {rightParams.heelCompensation >= 0 ? '+' : ''}{rightParams.heelCompensation.toFixed(1)}mm</p>
                   </div>
                 )}
@@ -665,7 +744,7 @@ export default function SolutionPage({ onFinish }: SolutionPageProps) {
                   <div>
                     <p className="font-medium text-gray-700">左脚</p>
                     <p className="text-gray-500">{leftParams.footLength.toFixed(1)}cm × {leftParams.footWidth.toFixed(1)}cm · L{leftParams.archLevel} +{leftParams.archCorrection}mm</p>
-                    <p className="text-indigo-500">基厚 {(leftParams.baseThickness * 10).toFixed(1)}mm · 足跟 {leftParams.heelThickness}mm · 密度{leftParams.latticeDensity}</p>
+                    <p className="text-indigo-500">基厚 {(leftParams.baseThickness * 10).toFixed(1)}mm · 足跟 {leftParams.heelThickness}mm</p>
                     <p className="text-blue-500">前掌补偿 {leftParams.forefootCompensation >= 0 ? '+' : ''}{leftParams.forefootCompensation.toFixed(1)}mm · 后跟补偿 {leftParams.heelCompensation >= 0 ? '+' : ''}{leftParams.heelCompensation.toFixed(1)}mm</p>
                   </div>
                 )}
@@ -755,8 +834,8 @@ export default function SolutionPage({ onFinish }: SolutionPageProps) {
                     </span>
                   </div>
                   <div className="rounded-md bg-white/80 px-2.5 py-2 text-[11px] leading-5 text-slate-600 border border-slate-200">
-                    颜色表示当前点位补偿的正负和厚度变化：红色表示正补偿（局部抬高、增强支撑），蓝色表示负补偿（局部减压、让位）。
-                    颜色越深，表示该位置的补偿绝对值越大、厚度变化越明显；颜色越浅，表示补偿更接近 0。补偿仍按前掌、足弓、后跟三大区域平滑分布，不是台阶式突变。
+                    <p>颜色表示当前点位补偿的正负和厚度变化：红色表示正补偿（局部抬高、增强支撑），蓝色表示负补偿（局部减压、让位）。</p>
+                    <p>颜色越深，表示该位置的补偿绝对值越大、厚度变化越明显；颜色越浅，表示补偿更接近 0。</p>
                   </div>
                 </div>
               )}
@@ -827,9 +906,24 @@ export default function SolutionPage({ onFinish }: SolutionPageProps) {
             className="rounded-xl border border-gray-200 bg-white p-4"
           >
             <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-              <Ruler className="w-4 h-4 text-primary" />
-              足弓分级参考 (7级)
+              <Lightbulb className="w-4 h-4 text-primary" />
+              解决方案
             </h3>
+
+            <div className="mb-4 space-y-2">
+              <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-2 text-xs leading-5">
+                <p className="font-medium text-blue-900">
+                  左脚：L{leftParams.archLevel} {leftParams.archType}；足弓矫正厚度 +{Number(leftParams.archCorrection.toFixed(1))}mm
+                </p>
+              </div>
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs leading-5">
+                <p className="font-medium text-emerald-900">
+                  右脚：L{rightParams.archLevel} {rightParams.archType}；足弓矫正厚度 +{Number(rightParams.archCorrection.toFixed(1))}mm
+                </p>
+              </div>
+            </div>
+
+            <h4 className="font-medium text-xs text-muted-foreground mb-2">足弓分级参考 (1-7级)</h4>
             <div className="space-y-1.5">
               {[
                 { l: 1, t: '重度高弓', ai: '<0.10', c: '+10~12mm' },
@@ -854,9 +948,14 @@ export default function SolutionPage({ onFinish }: SolutionPageProps) {
               ))}
             </div>
 
+            <p className="mt-3 text-[11px] leading-5 text-muted-foreground flex items-start gap-2">
+              <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+              <span>足弓指数（AI）是基于静态足印面积计算的经典指标，至今仍是判断高足弓与扁平足的金标准。</span>
+            </p>
+
             <div className="mt-3 pt-3 border-t text-[11px] text-muted-foreground space-y-1">
-              <p>• BMI &gt; 28: 厚度增加1-2mm或硬度增加10%</p>
-              <p>• BMI &lt; 18.5: 厚度减少1mm，避免压迫感过强</p>
+              <p>• BMI &gt; 28: 足弓厚度增加1-2mm，避免支撑不足或缓冲不够</p>
+              <p>• BMI &lt; 18.5: 足弓厚度减少1mm，避免压迫感过强</p>
               <p>• Level 1/7: 建议首副鞋垫采用70%矫正量</p>
               <p>• 左右脚压力偏差 &gt;4%: 自动调整基础厚度使受力对等</p>
             </div>

@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  Download,
   Play,
   Square,
   RotateCcw,
@@ -44,6 +45,13 @@ import { Scene } from '@/components/Scene';
 import Pressure2DHeatmap from '@/components/Pressure2DHeatmap';
 import PressurePointCloud3D from '@/components/PressurePointCloud3D';
 import { DebugPanel } from '@/components/DebugPanel';
+import {
+  parseCSVData,
+  parseJSONCollectionData,
+  toCollectionCsv,
+  toCollectionJson,
+} from '@/lib/collectionData';
+import { downloadBlob } from '@/lib/insoleExporter';
 import { serialService, type BaudRate } from '@/lib/SerialService';
 
 interface CollectionPageProps {
@@ -53,39 +61,6 @@ interface CollectionPageProps {
 type CollectionMode = 'static' | 'dynamic';
 type CollectionStatus = 'idle' | 'countdown' | 'collecting' | 'completed';
 
-// CSV解析函数 - 与Python代码保持一致
-function parseCSVData(csvText: string): number[][] {
-  const lines = csvText.trim().split('\n');
-  const frames: number[][] = [];
-  
-  // 查找data列的索引
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-  const dataIndex = headers.findIndex(h => h === 'data');
-  
-  if (dataIndex === -1) {
-    throw new Error('CSV文件缺少 "data" 列');
-  }
-  
-  for (let i = 1; i < lines.length; i++) {
-    try {
-      const line = lines[i];
-      // 处理CSV中可能包含的引号和方括号
-      const match = line.match(/\[([^\]]+)\]/);
-      if (match) {
-        const values = match[1].split(',').map(v => parseFloat(v.trim()));
-        if (values.length === 4096) {
-          frames.push(values);
-        } else {
-          console.warn(`第${i}行数据长度不为4096，跳过`);
-        }
-      }
-    } catch (e) {
-      console.warn(`第${i}行解析失败，跳过`);
-    }
-  }
-  
-  return frames;
-}
 
 // 连通域标记算法 (4连通)
 function labelConnectedComponents(mask: boolean[][]): { labels: number[][]; numLabels: number } {
@@ -194,8 +169,16 @@ function preprocessFrame(data: number[]): number[][] {
   return denoised;
 }
 
+
 export default function CollectionPage({ onNext }: CollectionPageProps) {
   const { state, startCollection, stopCollection, setCollectionProgress, addCollectedFrame, clearCollectedData } = useApp();
+
+  const buildExportFileName = useCallback((extension: 'csv' | 'json') => {
+    const userName = state.currentUser?.name?.trim() || 'foot-pressure';
+    const safeName = userName.replace(/[\\/:*?"<>|\s]+/g, '_');
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    return `${safeName}_collection_${stamp}.${extension}`;
+  }, [state.currentUser?.name]);
   const [status, setStatus] = useState<CollectionStatus>('idle');
   const [mode, setMode] = useState<CollectionMode>('static');
   const [duration, setDuration] = useState('10');
@@ -425,13 +408,31 @@ export default function CollectionPage({ onNext }: CollectionPageProps) {
       clearInterval(collectingTimerRef.current);
       collectingTimerRef.current = null;
     }
+    clearCollectedData();
     setStatus('idle');
     setProgress(0);
     setElapsedTime(0);
     setCountdown(3);
     setCollectedFrames([]);
     setImportedFileName(null);
-  }, []);
+  }, [clearCollectedData]);
+
+  const handleExportCollection = useCallback(() => {
+    if (state.collectedData.length === 0) {
+      alert('当前没有可导出的采集数据');
+      return;
+    }
+
+    const csvContent = toCollectionCsv(state.collectedData);
+    const csvBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+    downloadBlob(csvBlob, buildExportFileName('csv'));
+
+    const payload = toCollectionJson(state.collectedData);
+    const jsonBlob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    setTimeout(() => {
+      downloadBlob(jsonBlob, buildExportFileName('json'));
+    }, 150);
+  }, [buildExportFileName, state.collectedData]);
 
   const handleSaveAndNext = useCallback(() => {
     onNext();
@@ -445,25 +446,27 @@ export default function CollectionPage({ onNext }: CollectionPageProps) {
   const handleFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    
+
     setIsImporting(true);
     setImportedFileName(file.name);
-    
+
     try {
       const text = await file.text();
-      console.log('[CSV Import] 开始解析文件:', file.name);
-      
-      const frames = parseCSVData(text);
-      console.log(`[CSV Import] 成功解析 ${frames.length} 帧数据`);
-      
+      const lowerName = file.name.toLowerCase();
+      const isJson = lowerName.endsWith('.json');
+      console.log(`[Collection Import] 开始解析${isJson ? 'JSON' : 'CSV'}文件:`, file.name);
+
+      const frames = isJson ? parseJSONCollectionData(text) : parseCSVData(text);
+      console.log(`[Collection Import] 成功解析 ${frames.length} 帧数据`);
+
       if (frames.length === 0) {
         throw new Error('未能解析到有效数据');
       }
-      
+
       // 清除之前的数据
       clearCollectedData();
       setCollectedFrames([]);
-      
+
       // 预处理并保存数据
       const processedFrames: number[][][] = [];
       for (const frame of frames) {
@@ -471,20 +474,20 @@ export default function CollectionPage({ onNext }: CollectionPageProps) {
         processedFrames.push(processed);
         addCollectedFrame(frame); // 保存原始数据到AppContext
       }
-      
+
       setCollectedFrames(processedFrames);
       setStatus('completed');
-      
+
       // 显示最后一帧作为预览
       if (processedFrames.length > 0) {
         setRealtimeData(processedFrames[processedFrames.length - 1]);
       }
-      
-      console.log(`[CSV Import] 导入完成，共 ${frames.length} 帧`);
-      
+
+      console.log(`[Collection Import] 导入完成，共 ${frames.length} 帧`);
+
     } catch (error) {
-      console.error('[CSV Import] 导入失败:', error);
-      alert(`CSV导入失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      console.error('[Collection Import] 导入失败:', error);
+      alert(`数据导入失败: ${error instanceof Error ? error.message : '未知错误'}`);
       setImportedFileName(null);
     } finally {
       setIsImporting(false);
@@ -522,7 +525,7 @@ export default function CollectionPage({ onNext }: CollectionPageProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".csv"
+        accept=".csv,.json,application/json,text/csv"
         onChange={handleFileChange}
         className="hidden"
       />
@@ -535,7 +538,7 @@ export default function CollectionPage({ onNext }: CollectionPageProps) {
       >
         <div>
           <h1 className="text-xl font-bold text-foreground">数据采集</h1>
-          <p className="text-xs text-muted-foreground">请按照指引完成足底压力数据采集，或导入 CSV 文件进行分析</p>
+          <p className="text-xs text-muted-foreground">请按照指引完成足底压力数据采集，或导入 CSV/JSON 文件进行分析</p>
         </div>
         <div className="flex items-center gap-2">
           {/* CSV 导入 */}
@@ -554,7 +557,7 @@ export default function CollectionPage({ onNext }: CollectionPageProps) {
             ) : (
               <>
                 <Upload className="w-3.5 h-3.5" />
-                导入 CSV
+                导入数据
               </>
             )}
           </Button>
@@ -653,7 +656,7 @@ export default function CollectionPage({ onNext }: CollectionPageProps) {
                     <Check className="w-3.5 h-3.5" />
                   </span>
                   <span className="text-xs font-semibold text-[var(--health-green)]">
-                    {importedFileName ? 'CSV 导入完成' : '采集完成'}
+                    {importedFileName ? '数据导入完成' : '采集完成'}
                   </span>
                 </div>
                 <p className="text-lg font-mono font-semibold">{state.collectedData.length} <span className="text-xs text-muted-foreground font-normal">帧</span></p>
@@ -885,7 +888,7 @@ export default function CollectionPage({ onNext }: CollectionPageProps) {
                   </Button>
                   {!isConnected && !importedFileName && (
                     <span className="text-xs text-white bg-black/60 backdrop-blur px-3 py-1 rounded-full">
-                      请先连接设备或导入 CSV
+                      请先连接设备或导入数据
                     </span>
                   )}
                 </motion.div>
@@ -926,6 +929,15 @@ export default function CollectionPage({ onNext }: CollectionPageProps) {
                   >
                     <RotateCcw className="w-4 h-4" />
                     重新采集
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    onClick={handleExportCollection}
+                    className="rounded-full px-5 h-12 shadow-lg gap-2 bg-white/95 backdrop-blur"
+                  >
+                    <Download className="w-4 h-4" />
+                    导出为 CSV
                   </Button>
                   <Button
                     size="lg"

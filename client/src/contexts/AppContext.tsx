@@ -58,6 +58,8 @@ export interface FootAnalysisResult {
   };
 }
 
+export type AnalysisStatus = 'idle' | 'pending' | 'ready' | 'error';
+
 // 应用状态类型
 interface AppState {
   currentStep: number;
@@ -66,6 +68,7 @@ interface AppState {
   collectionProgress: number;
   reportData: ReportData | null;
   footAnalysis: FootAnalysisResult | null; // 精确的足底分析结果
+  analysisStatus: AnalysisStatus;
   collectedData: number[][]; // 采集的帧数据 (每帧4096个数据点)
 }
 
@@ -79,6 +82,7 @@ interface AppContextType {
   setCollectionProgress: (progress: number) => void;
   setReportData: (data: ReportData | null) => void;
   setFootAnalysis: (data: FootAnalysisResult | null) => void;
+  setAnalysisStatus: (status: AnalysisStatus) => void;
   addCollectedFrame: (frame: number[]) => void;
   setCollectedData: (data: number[][]) => void;
   clearCollectedData: () => void;
@@ -92,6 +96,7 @@ const initialState: AppState = {
   collectionProgress: 0,
   reportData: null,
   footAnalysis: null,
+  analysisStatus: 'idle',
   collectedData: [],
 };
 
@@ -128,6 +133,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState(prev => ({ ...prev, footAnalysis: data }));
   }, []);
 
+  const setAnalysisStatus = useCallback((status: AnalysisStatus) => {
+    setState(prev => ({ ...prev, analysisStatus: status }));
+  }, []);
+
   const addCollectedFrame = useCallback((frame: number[]) => {
     setState(prev => ({
       ...prev,
@@ -158,6 +167,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setCollectionProgress,
         setReportData,
         setFootAnalysis,
+        setAnalysisStatus,
         addCollectedFrame,
         setCollectedData,
         clearCollectedData,

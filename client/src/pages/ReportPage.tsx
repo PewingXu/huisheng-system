@@ -7,11 +7,18 @@
  * - COP分析（轨迹、置信椭圆、摇摆特征）
  */
 
-import { useApp } from '@/contexts/AppContext';
+import {
+  useApp,
+  type FootAnalysisResult,
+  type ReportData,
+  type FootData as AppFootData,
+  type PressureData,
+} from '@/contexts/AppContext';
 import { Button } from '@/components/ui/button';
-import { ArrowRight, User, Ruler, BarChart3, Activity, Target, Info } from 'lucide-react';
+import { parseCSVData } from '@/lib/collectionData';
+import { ArrowRight, Upload, User, Ruler, BarChart3, Activity, Target, Info } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import {
   BarChart,
   Bar,
@@ -453,23 +460,153 @@ function MliIndicator({ label, result }: { label: string; result: MliResult | nu
   );
 }
 
+function getArchHeight(archType: string): AppFootData['archHeight'] {
+  if (archType.includes('扁')) return 'low';
+  if (archType.includes('高')) return 'high';
+  return 'normal';
+}
+
+function createSharedReportData(report: FootReport, currentUser: ReportData['user']): ReportData {
+  const buildFoot = (length: number, width: number, archType: string): AppFootData => ({
+    footLength: length,
+    footWidth: width,
+    pronation: 'normal',
+    archHeight: getArchHeight(archType),
+  });
+
+  const buildPressure = (
+    totalPressure: number,
+    area: number,
+    leftRatio: number,
+    forefootRatio: number,
+  ): PressureData => ({
+    peakPressure: totalPressure,
+    avgPressure: totalPressure,
+    totalPressure,
+    peakArea: area,
+    avgArea: area,
+    leftRightRatio: leftRatio,
+    frontBackRatio: forefootRatio,
+  });
+
+  return {
+    user: currentUser,
+    leftFoot: buildFoot(report.left.length, report.left.width, report.left.archAnalysis.archType),
+    rightFoot: buildFoot(report.right.length, report.right.width, report.right.archAnalysis.archType),
+    leftPressure: buildPressure(
+      report.left.footData.pressure,
+      report.left.footData.area,
+      report.bilateral.leftPressureRatio,
+      report.bilateral.forefootRatio,
+    ),
+    rightPressure: buildPressure(
+      report.right.footData.pressure,
+      report.right.footData.area,
+      report.bilateral.rightPressureRatio,
+      report.bilateral.forefootRatio,
+    ),
+    timestamp: new Date(),
+  };
+}
+
+function createFootAnalysis(report: FootReport): FootAnalysisResult {
+  return {
+    left: {
+      archIndex: report.left.archAnalysis.archIndex,
+      archType: report.left.archAnalysis.archType,
+      footLength: report.left.length,
+      footWidth: report.left.width,
+      totalPressure: report.left.footData.pressure,
+    },
+    right: {
+      archIndex: report.right.archAnalysis.archIndex,
+      archType: report.right.archAnalysis.archType,
+      footLength: report.right.length,
+      footWidth: report.right.width,
+      totalPressure: report.right.footData.pressure,
+    },
+    bilateral: {
+      leftPressureRatio: report.bilateral.leftPressureRatio,
+      rightPressureRatio: report.bilateral.rightPressureRatio,
+    },
+  };
+}
+
 export default function ReportPage({ onNext }: ReportPageProps) {
-  const { state, setFootAnalysis } = useApp();
+  const {
+    state,
+    clearCollectedData,
+    setCollectedData,
+    setFootAnalysis,
+    setReportData,
+    setAnalysisStatus,
+  } = useApp();
   const [report, setReport] = useState<FootReport | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [analysisSource, setAnalysisSource] = useState<'python' | 'js' | null>(null);
   const [pythonImages, setPythonImages] = useState<PythonImages | null>(null);
   const [archFeatures, setArchFeatures] = useState<PythonArchFeatures | null>(null);
   const [copTrajectories, setCopTrajectories] = useState<{ left: number[][]; right: number[][] } | null>(null);
+  const [isImportingCsv, setIsImportingCsv] = useState(false);
+  const [importedCsvName, setImportedCsvName] = useState<string | null>(null);
+  const csvInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportCsvClick = useCallback(() => {
+    csvInputRef.current?.click();
+  }, []);
+
+  const handleCsvFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsImportingCsv(true);
+    setAnalysisStatus('pending');
+    setFootAnalysis(null);
+    setReportData(null);
+
+    try {
+      const text = await file.text();
+      const frames = parseCSVData(text);
+
+      if (frames.length === 0) {
+        throw new Error('未能解析到有效数据');
+      }
+
+      clearCollectedData();
+      setCollectedData(frames);
+      setImportedCsvName(file.name);
+    } catch (error) {
+      console.error('[Report CSV Import] 导入失败:', error);
+      setAnalysisStatus('error');
+      alert(`CSV 导入失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setIsImportingCsv(false);
+      if (csvInputRef.current) {
+        csvInputRef.current.value = '';
+      }
+    }
+  }, [clearCollectedData, setAnalysisStatus, setCollectedData, setFootAnalysis, setReportData]);
 
   // 生成报告数据：优先使用 Python 后端，失败时回退到前端 JS 计算
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
+    setAnalysisStatus('pending');
 
     const frames = state.collectedData.length > 0
       ? state.collectedData
       : generateMockFrames(100);
+
+    const publishSharedAnalysis = (reportData: FootReport) => {
+      const currentUser = state.currentUser ?? {
+        id: 'mock-user',
+        name: '测试用户',
+        createdAt: new Date(),
+      };
+      setReportData(createSharedReportData(reportData, currentUser));
+      setFootAnalysis(createFootAnalysis(reportData));
+      setAnalysisStatus('ready');
+    };
 
     async function runAnalysis() {
       // 尝试 Python 后端
@@ -486,28 +623,8 @@ export default function ReportPage({ onNext }: ReportPageProps) {
             if (result.data.left_cop_trajectory && result.data.right_cop_trajectory) {
               setCopTrajectories({ left: result.data.left_cop_trajectory, right: result.data.right_cop_trajectory });
             }
+            publishSharedAnalysis(reportData);
             setIsLoading(false);
-            // 将精确分析结果写入AppContext，供解决方案页联动
-            setFootAnalysis({
-              left: {
-                archIndex: reportData.left.archAnalysis.archIndex,
-                archType: reportData.left.archAnalysis.archType,
-                footLength: reportData.left.length,
-                footWidth: reportData.left.width,
-                totalPressure: reportData.left.footData.pressure,
-              },
-              right: {
-                archIndex: reportData.right.archAnalysis.archIndex,
-                archType: reportData.right.archAnalysis.archType,
-                footLength: reportData.right.length,
-                footWidth: reportData.right.width,
-                totalPressure: reportData.right.footData.pressure,
-              },
-              bilateral: {
-                leftPressureRatio: reportData.bilateral.leftPressureRatio,
-                rightPressureRatio: reportData.bilateral.rightPressureRatio,
-              },
-            });
             console.log('[Report] 使用 Python 后端分析完成');
             return;
           }
@@ -522,28 +639,10 @@ export default function ReportPage({ onNext }: ReportPageProps) {
         setReport(reportData);
         setAnalysisSource('js');
         setIsLoading(false);
-        // 将精确分析结果写入AppContext，供解决方案页联动
         if (reportData) {
-          setFootAnalysis({
-            left: {
-              archIndex: reportData.left.archAnalysis.archIndex,
-              archType: reportData.left.archAnalysis.archType,
-              footLength: reportData.left.length,
-              footWidth: reportData.left.width,
-              totalPressure: reportData.left.footData.pressure,
-            },
-            right: {
-              archIndex: reportData.right.archAnalysis.archIndex,
-              archType: reportData.right.archAnalysis.archType,
-              footLength: reportData.right.length,
-              footWidth: reportData.right.width,
-              totalPressure: reportData.right.footData.pressure,
-            },
-            bilateral: {
-              leftPressureRatio: reportData.bilateral.leftPressureRatio,
-              rightPressureRatio: reportData.bilateral.rightPressureRatio,
-            },
-          });
+          publishSharedAnalysis(reportData);
+        } else {
+          setAnalysisStatus('error');
         }
         console.log('[Report] 使用前端 JS 分析完成');
       }
@@ -551,7 +650,7 @@ export default function ReportPage({ onNext }: ReportPageProps) {
 
     runAnalysis();
     return () => { cancelled = true; };
-  }, [state.collectedData]);
+  }, [setAnalysisStatus, setFootAnalysis, setReportData, state.collectedData, state.currentUser]);
 
   // 准备图表数据
   const chartData = useMemo(() => {
@@ -733,6 +832,14 @@ export default function ReportPage({ onNext }: ReportPageProps) {
 
   return (
     <div className="min-h-screen p-6 overflow-y-auto">
+      <input
+        ref={csvInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        onChange={handleCsvFileChange}
+        className="hidden"
+      />
+
       {/* 页面标题 */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
@@ -754,12 +861,37 @@ export default function ReportPage({ onNext }: ReportPageProps) {
                   JS
                 </span>
               )}
+              {importedCsvName && (
+                <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+                  已导入 {importedCsvName}
+                </span>
+              )}
             </p>
           </div>
-          <Button onClick={onNext} className="group">
-            查看解决方案
-            <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={handleImportCsvClick}
+              disabled={isImportingCsv}
+              className="gap-2"
+            >
+              {isImportingCsv ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  导入中...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4" />
+                  导入 CSV
+                </>
+              )}
+            </Button>
+            <Button onClick={onNext} className="group" disabled={isLoading || isImportingCsv || state.analysisStatus === 'pending'}>
+              查看解决方案
+              <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </Button>
+          </div>
         </div>
       </motion.div>
 
